@@ -28,7 +28,21 @@ test('login and book pickleball court @booking', async ({ page }) => {
   // Select Pickleball site and reload reservations
   await page.locator('#site').selectOption('93');
   await page.goto(RESERVATION_URL);
-  await page.waitForSelector('table', { timeout: 30000 });
+
+  // Wait for the actual reservation grid (Start Time table), not just any table.
+  const waitForScheduleGrid = async () => {
+    const scheduleTable = page.locator('table').filter({ hasText: 'Start Time' }).last();
+    await expect(scheduleTable).toBeVisible({ timeout: 45000 });
+  };
+
+  try {
+    await waitForScheduleGrid();
+  } catch {
+    // OCRS can occasionally render partial content; one hard refresh usually resolves it.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForScheduleGrid();
+  }
+
   await page.screenshot({ path: 'after-login.png', fullPage: true });
   console.log('Login successful, calendar loaded.');
 
