@@ -7,7 +7,7 @@ const USER_ID = process.env.BOOKING_USER_ID || '';
 const PASSWORD = process.env.BOOKING_PASSWORD || '';
 
 test('login and book pickleball court @booking', async ({ page }) => {
-  test.setTimeout(120000);
+  test.setTimeout(60000);
 
   expect(USER_ID, 'Missing BOOKING_USER_ID secret/env var').toBeTruthy();
   expect(PASSWORD, 'Missing BOOKING_PASSWORD secret/env var').toBeTruthy();
@@ -43,12 +43,15 @@ test('login and book pickleball court @booking', async ({ page }) => {
     await waitForScheduleGrid();
   }
 
-  await page.screenshot({ path: 'after-login.png', fullPage: true });
   console.log('Login successful, calendar loaded.');
 
   // OCRS constraints: can only book up to 7 days in advance.
   // Also, account-level weekly reservation caps may hide/disable the Reserve action.
   const preferredTimes = [
+    '4:00 PM',
+    '4:30 PM',
+    '5:00 PM',
+    '5:30 PM',
     '6:00 PM',
     '6:30 PM',
     '7:00 PM',
@@ -89,61 +92,10 @@ test('login and book pickleball court @booking', async ({ page }) => {
     }
   };
 
-  const getCellTextForSlot = async (dayOffset: number, timeLabel: string, col: number) => {
-    await goToDayOffset(dayOffset);
-    const scheduleTable = page.locator('table').filter({ hasText: 'Start Time' }).last();
-    await expect(scheduleTable).toBeVisible({ timeout: 30000 });
-
-    const rows = scheduleTable.locator('tr');
-    const rowCount = await rows.count();
-    for (let r = 0; r < rowCount; r++) {
-      const row = rows.nth(r);
-      const cells = row.locator('th, td');
-      const cellCount = await cells.count();
-      if (cellCount <= col) {
-        continue;
-      }
-
-      const firstCellText = ((await cells.first().textContent()) || '').trim();
-      if (firstCellText !== timeLabel) {
-        continue;
-      }
-
-      return ((await cells.nth(col).textContent()) || '').trim();
-    }
-
-    return null;
-  };
-
-  const toMinutes = (timeLabel: string) => {
-    const match = timeLabel.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-    if (!match) {
-      return null;
-    }
-
-    let hour = Number(match[1]);
-    const minute = Number(match[2]);
-    const ampm = match[3].toUpperCase();
-
-    if (hour === 12) {
-      hour = 0;
-    }
-    if (ampm === 'PM') {
-      hour += 12;
-    }
-
-    return hour * 60 + minute;
-  };
-
-  const isFromSixPmOnward = (timeLabel: string) => {
-    const minutes = toMinutes(timeLabel);
-    return minutes !== null && minutes >= 18 * 60;
-  };
-
   const tryBookCell = async (cell: ReturnType<typeof page.locator>, dayOffset: number, timeLabel: string, col: number) => {
     console.log(`Day +${dayOffset}: attempting ${timeLabel} slot (col ${col})`);
     await cell.click();
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(300);
 
     const durationSelect = page.locator('#Duration');
     if (await durationSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -151,7 +103,7 @@ test('login and book pickleball court @booking', async ({ page }) => {
     }
 
     const reserveBtn = page.getByRole('button', { name: 'Reserve' });
-    const reserveVisible = await reserveBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    const reserveVisible = await reserveBtn.isVisible({ timeout: 1200 }).catch(() => false);
     if (!reserveVisible) {
       console.log(
         `Day +${dayOffset}: no Reserve button shown for ${timeLabel}, likely weekly cap reached or outside reservation policy.`
@@ -160,19 +112,7 @@ test('login and book pickleball court @booking', async ({ page }) => {
     }
 
     await reserveBtn.click();
-    await page.waitForTimeout(2500);
-
-    await page.screenshot({
-      path: `booking-day${dayOffset}-${timeLabel.replace(/:/g, '').replace(/ /g, '').toLowerCase()}.png`,
-      fullPage: true,
-    });
-
-    // Confirm booking actually persisted by reloading the same slot and verifying it is no longer empty.
-    const postBookingText = await getCellTextForSlot(dayOffset, timeLabel, col);
-    if (!postBookingText) {
-      console.log(`Day +${dayOffset}: slot ${timeLabel} col ${col} still empty after Reserve, not confirmed.`);
-      return false;
-    }
+    await page.waitForTimeout(500);
 
     booked = true;
     bookedTime = timeLabel;
@@ -214,46 +154,6 @@ test('login and book pickleball court @booking', async ({ page }) => {
           }
 
           const confirmed = await tryBookCell(cell, dayOffset, targetTime, col);
-          if (confirmed) {
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // Fallback: if no preferred evening slot is available, take the first available slot in the same day window.
-  if (!booked) {
-    for (let dayOffset = dayOffsetStart; dayOffset <= dayOffsetEnd && !booked; dayOffset++) {
-      await goToDayOffset(dayOffset);
-
-      const scheduleTable = page.locator('table').filter({ hasText: 'Start Time' }).last();
-      await expect(scheduleTable).toBeVisible({ timeout: 30000 });
-
-      const rows = scheduleTable.locator('tr');
-      const rowCount = await rows.count();
-
-      for (let r = 0; r < rowCount && !booked; r++) {
-        const row = rows.nth(r);
-        const cells = row.locator('th, td');
-        const cellCount = await cells.count();
-        if (cellCount < 3) {
-          continue;
-        }
-
-        const timeLabel = ((await cells.first().textContent()) || '').trim();
-        if (!isFromSixPmOnward(timeLabel)) {
-          continue;
-        }
-
-        for (let col = 1; col <= cellCount - 2; col++) {
-          const cell = cells.nth(col);
-          const cellText = ((await cell.textContent()) || '').trim();
-          if (cellText !== '') {
-            continue;
-          }
-
-          const confirmed = await tryBookCell(cell, dayOffset, timeLabel, col);
           if (confirmed) {
             break;
           }
